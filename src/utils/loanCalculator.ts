@@ -1,3 +1,6 @@
+import { getTaxaPadrao } from '../lib/finance/rates';
+import { roundCents } from '../lib/finance/rounding';
+
 /**
  * Regras de Negócio do Crédito Popular:
  * - Valores: R$ 100,00 a R$ 1.000,00
@@ -19,15 +22,18 @@ export function calculateLoan(amount: number, termDays: 10 | 20 | 30): LoanCalcu
   const maxAmountForTerm = termDays === 10 ? 300 : 1000;
   const validAmount = Math.max(100, Math.min(maxAmountForTerm, amount));
 
-  const rateMultiplier = termDays === 10 ? 0.10 : termDays === 20 ? 0.20 : 0.30;
-  
+  // Taxa vem da tabela oficial única (src/lib/finance/rates.ts) — a mesma
+  // usada no refinanciamento do admin, para nunca haver divergência entre
+  // o valor simulado pro cliente e o que o sistema realmente cobra.
+  const rateMultiplier = getTaxaPadrao(termDays);
+
   const interestAmount = Math.round(validAmount * rateMultiplier);
   const totalPayable = validAmount + interestAmount;
 
   // Quantidade exata de parcelas diárias (10, 20 ou 30)
   const businessDaysCount = termDays;
 
-  const dailyInstallment = Number((totalPayable / businessDaysCount).toFixed(2));
+  const dailyInstallment = roundCents(totalPayable / businessDaysCount);
 
   return {
     principal: validAmount,

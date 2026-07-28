@@ -1,4 +1,5 @@
 import { Parcela } from '../types/parcela';
+import { distribuirValorEmParcelas } from './finance/rounding';
 
 export function generateInstallmentSchedule(params: {
   principal: number;
@@ -25,7 +26,9 @@ export function generateInstallmentSchedule(params: {
   } = params;
 
   const parcelas: Parcela[] = [];
-  const valorParcela = Math.round((totalPayable / qtdeParcelas) * 100) / 100;
+  // Distribui o total em N parcelas SEM perda/sobra de centavos — a soma das
+  // parcelas geradas é sempre exatamente igual ao totalPayable.
+  const valoresParcelas = distribuirValorEmParcelas(totalPayable, qtdeParcelas);
 
   let currentDate = new Date(dataInicioISO.includes('T') ? dataInicioISO : dataInicioISO + 'T00:00:00');
   currentDate.setDate(currentDate.getDate() + 1);
@@ -48,23 +51,23 @@ export function generateInstallmentSchedule(params: {
     }
 
     if (isValidDay) {
-      count++;
       const yyyy = currentDate.getFullYear();
       const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
       const dd = String(currentDate.getDate()).padStart(2, '0');
       const dataVencimento = `${yyyy}-${mm}-${dd}`;
 
       parcelas.push({
-        id: `parc_${emprestimoId}_${count}`,
+        id: `parc_${emprestimoId}_${count + 1}`,
         emprestimo_id: emprestimoId,
         cliente_id: clienteId,
         cliente_nome: clienteNome,
         cliente_tel: clienteTel,
-        numero_parcela: count,
-        valor_esperado: count === qtdeParcelas ? Math.round((totalPayable - valorParcela * (qtdeParcelas - 1)) * 100) / 100 : valorParcela,
+        numero_parcela: count + 1,
+        valor_esperado: valoresParcelas[count],
         data_vencimento: dataVencimento,
         status: 'pendente',
       });
+      count++;
     }
 
     currentDate.setDate(currentDate.getDate() + 1);

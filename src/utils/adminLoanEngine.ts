@@ -1,7 +1,12 @@
 import { Cliente, Emprestimo, Parcela } from '../types';
+import { generateInstallmentSchedule } from '../lib/installments';
 
 /**
- * Calculates due dates and generates installments for a loan, skipping non-collection days.
+ * Wrapper fino sobre generateInstallmentSchedule (src/lib/installments.ts).
+ * Antes, essa função tinha sua própria implementação duplicada — com uma
+ * regra de arredondamento diferente na última parcela, o que podia causar
+ * a soma das parcelas divergir do valor total devido em alguns centavos.
+ * Agora ambas usam exatamente a mesma lógica (fonte única da verdade).
  */
 export function gerarParcelas(
   valorPrincipal: number,
@@ -14,55 +19,25 @@ export function gerarParcelas(
   clienteNome: string,
   clienteTel: string
 ): Parcela[] {
-  const parcelas: Parcela[] = [];
-  const valorParcela = Math.round((valorTotalDevido / qtdeParcelas) * 100) / 100;
+  const parcelas = generateInstallmentSchedule({
+    principal: valorPrincipal,
+    totalPayable: valorTotalDevido,
+    qtdeParcelas,
+    dataInicioISO,
+    diasCobranca,
+    emprestimoId,
+    clienteId,
+    clienteNome,
+    clienteTel,
+  });
 
-  // First installment starts on the day after loan initiation
-  let currentDate = new Date(dataInicioISO.includes('T') ? dataInicioISO : dataInicioISO + 'T00:00:00');
-  currentDate.setDate(currentDate.getDate() + 1);
-
-  let count = 0;
-  while (count < qtdeParcelas) {
-    const dayOfWeek = currentDate.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-
-    let isValidDay = false;
-    if (diasCobranca === 'seg-dom') {
-      isValidDay = true;
-    } else if (diasCobranca === 'seg-sab') {
-      isValidDay = dayOfWeek !== 0; // Skip Sunday
-    } else if (diasCobranca === 'seg-sex') {
-      isValidDay = dayOfWeek >= 1 && dayOfWeek <= 5; // Skip Sat & Sun
-    }
-
-    if (isValidDay) {
-      count++;
-      const yyyy = currentDate.getFullYear();
-      const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
-      const dd = String(currentDate.getDate()).padStart(2, '0');
-      const dataVencimento = `${yyyy}-${mm}-${dd}`;
-
-      // Check if past due date relative to today
-      const todayISO = new Date().toISOString().split('T')[0];
-      const isPast = dataVencimento < todayISO;
-
-      parcelas.push({
-        id: `parc_${emprestimoId}_${count}`,
-        emprestimo_id: emprestimoId,
-        cliente_id: clienteId,
-        cliente_nome: clienteNome,
-        cliente_tel: clienteTel,
-        numero_parcela: count,
-        valor_esperado: count === qtdeParcelas ? valorTotalDevido - valorParcela * (qtdeParcelas - 1) : valorParcela,
-        data_vencimento: dataVencimento,
-        status: isPast ? 'atrasada' : 'pendente',
-      });
-    }
-
-    // Move to next calendar day
-    currentDate.setDate(currentDate.getDate() + 1);
-  }
-
-  return parcelas;
+  // Mantém o comportamento original: se por algum motivo a data gerada já
+  // ficou no passado (ex: refinanciamento feito após o horário de corte),
+  // a parcela já nasce marcada como atrasada em vez de pendente.
+  const todayISO = new Date().toISOString().split('T')[0];
+  return parcelas.map((p) =>
+    p.data_vencimento < todayISO ? { ...p, status: 'atrasada' as const } : p
+  );
 }
 
 /**

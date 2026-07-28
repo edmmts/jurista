@@ -33,6 +33,8 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { Cliente, Emprestimo, Parcela } from '../types';
+import { getTaxaPadrao, PERCENTUAL_DESCONTO_QUITACAO_ANTECIPADA, PERCENTUAL_MULTA_ATRASO } from '../lib/finance/rates';
+import { roundCents, distribuirValorEmParcelas } from '../lib/finance/rounding';
 import { LeadPipelineCRM } from './LeadPipelineCRM';
 import {
   gerarParcelas,
@@ -484,7 +486,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
     if (!targetParcela) return;
 
     // Calculate 5% fine if selected
-    const fineValue = applyDailyFine ? Math.round(targetParcela.valor_esperado * 0.05 * 100) / 100 : 0;
+    const fineValue = applyDailyFine ? roundCents(targetParcela.valor_esperado * PERCENTUAL_MULTA_ATRASO) : 0;
     const novoValorEsperado = targetParcela.valor_esperado + fineValue;
 
     setParcelas((prev) =>
@@ -720,10 +722,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
       prev.map((e) => (e.id === activeLoan.id ? { ...e, status: 'quitado' } : e))
     );
 
-    // Create new loan
-    const rateMultiplier = refinTerm === 10 ? 0.10 : refinTerm === 20 ? 0.20 : 0.30;
+    // Create new loan — usa a MESMA tabela de taxas oficial do simulador
+    // público (src/lib/finance/rates.ts), evitando divergência entre o que
+    // o cliente vê simulado e o que é realmente cobrado no refinanciamento.
+    const rateMultiplier = getTaxaPadrao(refinTerm);
     const valorTotalDevido = Math.round(remainingBalance * (1 + rateMultiplier));
-    const valorParcela = Math.round((valorTotalDevido / refinTerm) * 100) / 100;
+    const valorParcela = roundCents(valorTotalDevido / refinTerm);
 
     const newLoanId = `emp_${Date.now()}`;
     const newEmprestimo: Emprestimo = {
@@ -770,8 +774,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
       return;
     }
 
-    // Apply 15% discount
-    const payoffValue = Math.round(remainingBalance * 0.85 * 100) / 100;
+    // Apply discount (percentual único vindo da tabela de taxas — sem número
+    // mágico duplicado) — distribuído parcela a parcela em centavos, para
+    // a soma do que foi baixado bater exatamente com o payoffValue.
+    const payoffValue = roundCents(remainingBalance * (1 - PERCENTUAL_DESCONTO_QUITACAO_ANTECIPADA));
+    const valoresPagos = distribuirValorEmParcelas(payoffValue, unpaidParcelas.length);
+    const valorPagoPorParcelaId = new Map(
+      unpaidParcelas.map((p, idx) => [p.id, valoresPagos[idx]])
+    );
 
     // Register all unpaid as paid
     setParcelas((prev) =>
@@ -780,7 +790,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
           return {
             ...p,
             status: 'paga',
-            valor_pago: p.valor_esperado * 0.85,
+            valor_pago: valorPagoPorParcelaId.get(p.id) ?? roundCents(p.valor_esperado * (1 - PERCENTUAL_DESCONTO_QUITACAO_ANTECIPADA)),
             data_pagamento: todayISO,
           };
         }
@@ -1401,7 +1411,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
             0
           );
           const jurosAtrasoTotal = parcelasAtrasadasActive.reduce(
-            (acc, p) => acc + (p.valor_multa || (p.multa_aplicada ? 5 : 0)),
+            (acc, p) => acc + (p.valor_multa || 0),
             0
           );
           const valorHojeBase = parcelaHojeActive ? parcelaHojeActive.valor_esperado : 0;
@@ -2140,7 +2150,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
                     <div>
                       <span className="font-extrabold text-rose-300 block">Cobrar Multa Diária de 5%</span>
                       <span className="text-[11px] text-slate-300">
-                        Adiciona 5% ao valor da parcela ({formatCurrency(delayModalParcela.valor_esperado * 0.05)}).
+                        Adiciona 5% ao valor da parcela ({formatCurrency(delayModalParcela.valor_esperado * PERCENTUAL_MULTA_ATRASO)}).
                         Novo valor total: <strong>{formatCurrency(delayModalParcela.valor_esperado * 1.05)}</strong>.
                       </span>
                     </div>
