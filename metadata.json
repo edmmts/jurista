@@ -1,0 +1,6 @@
+{
+  "name": "Crédito Popular",
+  "description": "MVP de Landing Page Mobile-First com simulação em tempo real e Lead Wizard em 5 etapas para empréstimo popular.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
